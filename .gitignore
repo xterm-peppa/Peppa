@@ -1,1 +1,5 @@
 /target
+.DS_Store
+*.app/
+*.zip
+*.tar.gz
