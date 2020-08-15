@@ -27,7 +27,7 @@ void main() {
         vertexPosition = cellPosition + uvOffset + position * uvSize;
     } else if (drawFlag == 2) {
         vertexPosition = cellPosition + position * cellSize;
-    } else if (drawFlag == 3) {
+    } else {
         vertexPosition = cellPosition + vec2(position.x, uvOffset.y - uvSize.y + baseline);
     }
 

@@ -1,11 +1,14 @@
-use log::{debug, info};
-
-use glutin::dpi::{PhysicalPosition, PhysicalSize};
-use glutin::event_loop::EventLoop;
-use glutin::window::{CursorIcon, WindowBuilder};
-use glutin::{self, ContextBuilder, PossiblyCurrent, WindowedContext};
-
-use crate::shader;
+use {
+    crate::shader,
+    glutin::{
+        self,
+        dpi::{PhysicalPosition, PhysicalSize},
+        event_loop::EventLoop,
+        window::{CursorIcon, WindowBuilder},
+        ContextBuilder, PossiblyCurrent, WindowedContext,
+    },
+    log::{debug, info},
+};
 
 #[derive(Debug)]
 pub enum Error {
@@ -68,7 +71,7 @@ impl Screen {
 
         shader.set_size(lines, columns);
 
-        debug!(
+        info!(
             "screen_width: {}, screen_height: {}",
             screen_width, screen_height
         );
@@ -77,13 +80,13 @@ impl Screen {
             .set_inner_size(PhysicalSize::new(screen_width, screen_height));
 
         Ok(Self {
-            title: title,
-            wc: wc,
-            lines: lines,
-            columns: columns,
+            title,
+            wc,
+            lines,
+            columns,
             width: screen_width,
             height: screen_height,
-            shader: shader,
+            shader,
         })
     }
 
@@ -105,7 +108,7 @@ impl Screen {
 
     pub fn draw_frame(&self) {
         self.shader.draw_frame();
-        self.wc.swap_buffers().unwrap();
+        self.wc.swap_buffers();
     }
 
     pub fn set_line(&mut self, row: usize, s: &str) {

@@ -1,17 +1,24 @@
+//! Peppa is a GPU enhanced terminal emulator.
+//! It can also be used to play MUD, as a SSH client, to connect to BBS, etc.
+
+#![deny(clippy::all, clippy::cargo)]
+#![allow(clippy::multiple_crate_versions)]
+#![warn(missing_docs)]
 #![cfg_attr(debug_assertions, allow(dead_code, unused))]
-
-use std::env;
-
-use glutin::event::{Event, WindowEvent};
-use glutin::event_loop::{ControlFlow, EventLoop};
-use log::info;
-use pretty_env_logger;
 
 mod font;
 mod gui;
 mod shader;
 
-use crate::gui::*;
+use {
+    crate::gui::Screen,
+    glutin::{
+        event::{Event, WindowEvent},
+        event_loop::{ControlFlow, EventLoop},
+    },
+    log::info,
+    std::env,
+};
 
 #[derive(Debug)]
 enum Error {
@@ -69,7 +76,7 @@ fn run(screen: Screen, el: EventLoop<()>) {
             Event::RedrawRequested(_) => {
                 screen.draw_frame();
             }
-            Event::LoopDestroyed => return,
+            Event::LoopDestroyed => {}
             _ => (),
         }
     });
