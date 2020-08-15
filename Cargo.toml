@@ -2,20 +2,29 @@
 name = "peppa"
 version = "0.1.0"
 authors = ["dzp <danzipao@gmail.com>"]
+description = "Peppa is a GPU enhanced terminal emulator. It can also be used to play MUD, act as a SSH client, connect to BBS, etc."
+repository = "https://github.com/xterm-peppa/Peppa"
+readme = "README.md"
+license = "GPLv3"
+keywords = ["terminal", "emulator", "mud"]
+categories = ["X11"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crossfont = "*"
-glutin = "*"
-log = "*"
-pretty_env_logger = "*"
-image = "*"
+crossfont = "0.1"
+glutin = "0.24"
+log = "0.4"
+pretty_env_logger = "0.4"
+image = "0.23"
 
 [build-dependencies]
-gl_generator = "0.14"
-rustc_tools_util = "*"
+gl_generator = "*"
+rustc_tools_util = "0.2"
 
-[target."cfg(target_os = \"macos\")".dependencies.core-text]
-version = "15"
+[target.'cfg(target_os = "macos")'.dependencies]
+core-text = "15"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3.7", features = ["impl-default", "wincon"]}

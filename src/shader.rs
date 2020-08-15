@@ -1,21 +1,15 @@
-use log::{debug, error};
-use std::collections::HashMap;
-
-use std::default::Default;
-use std::mem;
-use std::path::PathBuf;
-use std::ptr;
-use std::{fs, io};
-
-use crossfont::{BitmapBuffer, FontKey, GlyphKey, RasterizedGlyph};
-
-use crate::font::Font;
-
-pub mod gl {
+mod gl {
+    #![allow(clippy::all)]
     include!(concat!(env!("OUT_DIR"), "/gl_bindings.rs"));
 }
 
-use gl::types::*;
+use {
+    crate::font::Font,
+    crossfont::{BitmapBuffer, FontKey, GlyphKey, RasterizedGlyph},
+    gl::types::*,
+    log::{debug, error},
+    std::{collections::HashMap, default::Default, fs, io, mem, path::PathBuf, ptr},
+};
 
 /// Set OpenGL symbol loader. This call MUST be after window.make_current on windows.
 pub fn setup_opengl<F>(loader: F)
@@ -48,9 +42,12 @@ impl From<crossfont::Error> for CreationError {
 pub struct TextShader {
     program: GLuint,
     u_cell_size: GLint,
+    u_window_size: GLint,
     u_draw_flag: GLint,
 
     cells: Vec<Vec<Cell>>,
+
+    dpr: f32,
     pub cell_width: f32,
     pub cell_height: f32,
     pub cell_descent: f32,
@@ -68,6 +65,12 @@ pub struct TextShader {
     // Bold italic font.
     // bold_italic_key: FontKey,
 }
+
+static TEXT_SHADER_V_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/text.v.glsl");
+static TEXT_SHADER_F_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/text.f.glsl");
+
+static TEXT_SHADER_V: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/res/text.v.glsl"));
+static TEXT_SHADER_F: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/res/text.f.glsl"));
 
 impl TextShader {
     pub fn new(dpr: f32, font_family: &str, font_size: i32) -> Result<TextShader, CreationError> {
@@ -87,17 +90,20 @@ impl TextShader {
 
         let glyph_cache = GlyphCache::new(ft)?;
 
-        let mut u_cell_size: GLint = 0;
-        let mut u_draw_flag: GLint = 0;
-        unsafe {
-            u_cell_size = gl::GetUniformLocation(program, b"cellSize\0".as_ptr() as *const _);
-            u_draw_flag = gl::GetUniformLocation(program, b"drawFlag\0".as_ptr() as *const _);
-        }
+        let (u_cell_size, u_window_size, u_draw_flag) = unsafe {
+            (
+                gl::GetUniformLocation(program, b"cellSize\0".as_ptr() as *const _),
+                gl::GetUniformLocation(program, b"windowSize\0".as_ptr() as *const _),
+                gl::GetUniformLocation(program, b"drawFlag\0".as_ptr() as *const _),
+            )
+        };
 
         let shader = Self {
             program,
             u_cell_size,
+            u_window_size,
             u_draw_flag,
+            dpr,
             cell_width,
             cell_height,
             cell_descent,
@@ -145,7 +151,10 @@ impl TextShader {
     }
 
     pub fn resize(&self, width: u32, height: u32) {
-        unsafe { gl::Viewport(0, 0, width as _, height as _) };
+        unsafe {
+            gl::Viewport(0, 0, width as _, height as _);
+            gl::Uniform2f(self.u_window_size, width as f32, height as f32);
+        };
     }
 
     pub fn set_size(&mut self, lines: usize, columns: usize) {
@@ -180,8 +189,8 @@ impl TextShader {
     fn compute_cell_size(font: &mut Font) -> Result<(f32, f32, f32), CreationError> {
         let metrics = font.metrics()?;
 
-        let offset_x = f64::from(0.0);
-        let offset_y = f64::from(0.0);
+        let offset_x = 0.0;
+        let offset_y = 0.0;
 
         Ok((
             metrics.descent,
@@ -231,88 +240,74 @@ impl Cell {
         let mut vbo: GLuint = 0;
         let mut ebo: GLuint = 0;
         unsafe {
-            // 创建 1 组 VAO 数据，将 ID 记入 vao。这里可以创建多个
+            // Create VAO.
             gl::GenVertexArrays(1, &mut vao);
-            // 将 vao 绑定成为当前 VAO
             gl::BindVertexArray(vao);
 
-            // 创建 1 个 BO，将 ID 记入 ebo
+            // Create EBO.
             gl::GenBuffers(1, &mut ebo);
-            // 将 ebo 绑定成为当前 EBO
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
 
-            // 为指定 target 绑定的 EBO 赋予数据，也就是把数据 copy 到 GPU memory
+            // Set EBO.
+            // NOTE that the vertex index vector is cleverly set here.
+            // We can either use all 6 indices to draw the texture,
+            // or we can use only the first 4 indices to draw the bounding box.
             let indices: [u32; 6] = [0, 1, 2, 3, 0, 2];
             gl::BufferData(
-                gl::ELEMENT_ARRAY_BUFFER, // 指定 target 为 ELEMENT_ARRAY_BUFFER，即当前 EBO
+                gl::ELEMENT_ARRAY_BUFFER,
                 (mem::size_of::<u32>() * indices.len()) as _,
-                indices.as_ptr() as _, // 数据位置
-                gl::STATIC_DRAW,       // 数据内容不常变化
+                indices.as_ptr() as _,
+                gl::STATIC_DRAW,
             );
 
-            // 创建 1 个 BO，将 ID 记入 vbo
+            // Create VBO.
             gl::GenBuffers(1, &mut vbo);
-            // 将 vbo 绑定到 ARRAY_BUFFER（专用于放置顶点数据）这个 target 上，成为当前 VBO
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
 
-            // 为指定 target 绑定的 VBO 分配内存，因为这里没有提供指针，所以并不拷贝数据
+            // Just allocate GPU memory to the VBO here.
             gl::BufferData(
-                gl::ARRAY_BUFFER, // 指定 target 为 ARRAY_BUFFER，即当前 VBO
+                gl::ARRAY_BUFFER,
                 (mem::size_of::<GlInstanceAttr>()) as _,
-                ptr::null(),     // 数据位置
-                gl::STATIC_DRAW, // 数据内容不常变化
+                ptr::null(),
+                gl::STATIC_DRAW,
             );
 
             let sizeof_attr = mem::size_of::<GlInstanceAttr>();
-            let sizeof_nf32 = |n| n * mem::size_of::<f32>();
+            let define_vertex_attrib = |idx, n, offset| {
+                // Define vertex attrib pointer
+                gl::VertexAttribPointer(
+                    idx,              // Attrib index.
+                    n,                // Attrib size, in gl::FLOAT.
+                    gl::FLOAT,        // Attrib type.
+                    gl::FALSE,        // Don't be normalized.
+                    sizeof_attr as _, // Attrib stride.
+                    offset as _,      // Attrib pointer, offset of GlInstanceAttr.
+                );
+                // Enable it.
+                gl::EnableVertexAttribArray(idx);
+                // Vertex attributes are changed only when the instance changes.
+                gl::VertexAttribDivisor(idx, 1);
+                (idx + 1, offset + n * (mem::size_of::<f32>() as i32))
+            };
 
-            // 解释当前 VBO 里的数据，据此为当前 VAO 定义属性。这部分调用可以重复
-            gl::VertexAttribPointer(
-                0,                // 本次定义顶点的第 1 个属性（即 in vec2 gridCoords）
-                2,                // 本属性由 2 个...
-                gl::FLOAT,        //                 float32 来描述，也就是说是一个 vec2
-                gl::FALSE,        // 是否对顶点数据进行归一化
-                sizeof_attr as _, // 同一个属性在相邻两个实例之间的字节数
-                ptr::null(),      // 本属性在每组顶点属性数据中的偏移量
-            );
-            // 启用当前 VAO 的第 1 个属性，同样，可以重复
-            gl::EnableVertexAttribArray(0);
-            // 说明当前 VAO 的第 1 个属性是个实例数组，仅在 1 个实例后进行更新，不按顶点更新
-            gl::VertexAttribDivisor(0, 1);
+            // Define vertex attributes.
 
-            // 解释当前 VBO 里的数据，据此为当前 VAO 定义属性。这部分调用可以重复
-            gl::VertexAttribPointer(
-                1,                   // 本次定义顶点的第 2 个属性（即 in vec4 uvAttr）
-                4,                   // 本属性由 4 个...
-                gl::FLOAT,           //                 float32 来描述，也就是说是一个 vec4
-                gl::FALSE,           // 是否对顶点数据进行归一化
-                sizeof_attr as _,    // 同一个属性在相邻两个实例之间的字节数
-                sizeof_nf32(2) as _, // 本属性在每组顶点属性数据中的偏移量
-            );
-            // 启用当前 VAO 的第 2 个属性，同样，可以重复
-            gl::EnableVertexAttribArray(1);
-            // 说明当前 VAO 的第 2 个属性是个实例数组，仅在 1 个实例后进行更新，不按顶点更新
-            gl::VertexAttribDivisor(1, 1);
+            let (idx, offset) = (0, 0);
+            // in vec2 gridCoords
+            let (idx, offset) = define_vertex_attrib(idx, 2, offset);
+            // in vec4 uvAttr
+            let (idx, offset) = define_vertex_attrib(idx, 4, offset);
+            // in float baseline
+            let (idx, offset) = define_vertex_attrib(idx, 1, offset);
 
-            // 解释当前 VBO 里的数据，据此为当前 VAO 定义属性。这部分调用可以重复
-            gl::VertexAttribPointer(
-                2,                   // 本次定义顶点的第 3 个属性（即 in float baseline）
-                1,                   // 本属性由 1 个...
-                gl::FLOAT,           //                 float32 来描述，也就是说是一个 float
-                gl::FALSE,           // 是否对顶点数据进行归一化
-                sizeof_attr as _,    // 同一个属性在相邻两个实例之间的字节数
-                sizeof_nf32(6) as _, // 本属性在每组顶点属性数据中的偏移量
-            );
-            // 启用当前 VAO 的第 2 个属性，同样，可以重复
-            gl::EnableVertexAttribArray(2);
-            // 说明当前 VAO 的第 2 个属性是个实例数组，仅在 1 个实例后进行更新，不按顶点更新
-            gl::VertexAttribDivisor(2, 1);
+            // Just for make linter happy.
+            let (_, _) = (idx, offset);
         }
 
         Self {
-            vao: vao,
-            vbo: vbo,
-            ebo: ebo,
+            vao,
+            vbo,
+            ebo,
             gl_instance_attr: GlInstanceAttr {
                 row: row as _,
                 col: col as _,
@@ -325,15 +320,16 @@ impl Cell {
     pub fn set_text(&mut self, ch: char, glyph: &Glyph) {
         self.ch = ch;
         self.texture = glyph.texture;
-        self.gl_instance_attr.uv_width = glyph.uv_width;
-        self.gl_instance_attr.uv_height = glyph.uv_height;
-        self.gl_instance_attr.uv_offset_x = glyph.uv_left;
-        self.gl_instance_attr.uv_offset_y = glyph.uv_bot;
-        self.gl_instance_attr.baseline = glyph.uv_height - glyph.uv_ascent;
+
+        let (cell_descent, dpr) = (36.352074, 2.0); // FIXME: hard-code
+        self.gl_instance_attr.uv_width = glyph.width * dpr;
+        self.gl_instance_attr.uv_height = glyph.height * dpr;
+        self.gl_instance_attr.uv_offset_x = glyph.left * dpr;
+        self.gl_instance_attr.uv_offset_y = (glyph.top + cell_descent) * dpr;
+        self.gl_instance_attr.baseline = cell_descent * dpr;
     }
 
     fn draw(&self, draw_flag: i8) {
-        debug!("draw {}: {:?}", self.ch, self.gl_instance_attr);
         unsafe {
             gl::BindVertexArray(self.vao);
             gl::BindTexture(gl::TEXTURE_2D, self.texture);
@@ -342,18 +338,22 @@ impl Cell {
             gl::BufferSubData(
                 gl::ARRAY_BUFFER,
                 0,
-                (mem::size_of::<GlInstanceAttr>()) as _, // 同一个属性在相邻两个实例之间的字节数
+                (mem::size_of::<GlInstanceAttr>()) as _,
                 mem::transmute(&self.gl_instance_attr),
             );
             match draw_flag {
+                // draw texture(0)
                 0 => {
+                    debug!("draw {}: {:?}", self.ch, self.gl_instance_attr);
                     gl::PolygonMode(gl::FRONT_AND_BACK, gl::FILL);
                     gl::DrawElementsInstanced(gl::TRIANGLES, 6, gl::UNSIGNED_INT, ptr::null(), 1);
                 }
+                // draw bounding box(1) or cell box(2)
                 1 | 2 => {
                     gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
                     gl::DrawElementsInstanced(gl::LINE_LOOP, 4, gl::UNSIGNED_INT, ptr::null(), 1);
                 }
+                // draw baseline(3)
                 _ => {
                     gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
                     gl::DrawElementsInstanced(gl::LINE_LOOP, 4, gl::UNSIGNED_INT, ptr::null(), 1);
@@ -365,46 +365,95 @@ impl Cell {
     }
 }
 
-fn gl_get_info_log(kind: GLenum, obj: GLuint) -> String {
-    let mut max_length: GLint = 0;
-
-    let len_func = match kind {
-        gl::PROGRAM => gl::GetProgramiv,
-        gl::SHADER => gl::GetShaderiv,
-        _ => return String::new(),
-    };
-
-    let log_func = match kind {
-        gl::PROGRAM => gl::GetProgramInfoLog,
-        gl::SHADER => gl::GetShaderInfoLog,
-        _ => return String::new(),
-    };
-
-    unsafe {
-        len_func(obj, gl::INFO_LOG_LENGTH, &mut max_length);
-    }
-
-    let mut actual_length: GLint = 0;
-    let mut buf: Vec<u8> = Vec::with_capacity(max_length as _);
-
-    unsafe {
-        log_func(
-            obj,
-            max_length,
-            &mut actual_length,
-            buf.as_mut_ptr() as *mut _,
-        );
-        buf.set_len(actual_length as _);
-    }
-
-    String::from_utf8(buf).unwrap()
+#[derive(Copy, Debug, Clone, Default)]
+pub struct Glyph {
+    pub texture: GLuint,
+    pub top: f32,
+    pub left: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
-static TEXT_SHADER_V_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/text.v.glsl");
-static TEXT_SHADER_F_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/res/text.f.glsl");
+pub struct GlyphCache {
+    /// Cache of buffered glyphs.
+    cache: HashMap<GlyphKey, Glyph>,
 
-static TEXT_SHADER_V: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/res/text.v.glsl"));
-static TEXT_SHADER_F: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/res/text.f.glsl"));
+    font: Font,
+}
+
+impl GlyphCache {
+    pub fn new(font: Font) -> Result<GlyphCache, crossfont::Error> {
+        let cache = Self {
+            cache: HashMap::default(),
+            font,
+        };
+
+        Ok(cache)
+    }
+
+    pub fn get(&mut self, glyph_key: GlyphKey) -> Glyph {
+        if let Some(glyph) = self.cache.get(&glyph_key) {
+            return *glyph;
+        }
+
+        let rasterized = self
+            .font
+            .get_glyph(glyph_key)
+            .unwrap_or_else(|_| Default::default());
+
+        let glyph = self.load_glyph(&rasterized);
+        self.cache.insert(glyph_key, glyph);
+
+        glyph
+    }
+
+    pub fn load_glyph(&self, glyph: &RasterizedGlyph) -> Glyph {
+        let mut texture: GLuint = 0;
+        unsafe {
+            // Create texture object.
+            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
+            gl::GenTextures(1, &mut texture);
+            gl::ActiveTexture(gl::TEXTURE0);
+            gl::BindTexture(gl::TEXTURE_2D, texture);
+
+            // Set texture parameter.
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_BORDER as _);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_BORDER as _);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as _);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
+
+            // Parse glyph buffer.
+            let (format, buf) = match &glyph.buf {
+                BitmapBuffer::RGB(buf) => (gl::RGB, buf),
+                BitmapBuffer::RGBA(buf) => (gl::RGBA, buf),
+            };
+
+            // Load data into OpenGL.
+            gl::TexImage2D(
+                gl::TEXTURE_2D,
+                0,
+                format as _,
+                glyph.width,
+                glyph.height,
+                0,
+                format,
+                gl::UNSIGNED_BYTE,
+                buf.as_ptr() as *const _,
+            );
+
+            // All done.
+            gl::BindTexture(gl::TEXTURE_2D, 0);
+        }
+
+        Glyph {
+            texture,
+            top: glyph.top as _,
+            left: glyph.left as _,
+            width: glyph.width as _,
+            height: glyph.height as _,
+        }
+    }
+}
 
 fn create_shader(kind: GLenum, path: &str, source: &str) -> Result<GLuint, CreationError> {
     let source = if let Ok(string) = fs::read_to_string(path) {
@@ -457,130 +506,37 @@ fn create_program(vertex: GLuint, fragment: GLuint) -> Result<GLuint, CreationEr
     }
 }
 
-#[derive(Copy, Debug, Clone, Default)]
-pub struct Glyph {
-    pub texture: GLuint,
-    pub colored: bool,
-    pub top: f32,
-    pub left: f32,
-    pub width: f32,
-    pub height: f32,
-    pub uv_bot: f32,
-    pub uv_left: f32,
-    pub uv_width: f32,
-    pub uv_height: f32,
-    pub uv_ascent: f32,
-}
+fn gl_get_info_log(kind: GLenum, obj: GLuint) -> String {
+    let mut max_length: GLint = 0;
 
-pub struct GlyphCache {
-    /// Cache of buffered glyphs.
-    cache: HashMap<GlyphKey, Glyph>,
+    let len_func = match kind {
+        gl::PROGRAM => gl::GetProgramiv,
+        gl::SHADER => gl::GetShaderiv,
+        _ => return String::new(),
+    };
 
-    /// Cache of buffered cursor glyphs.
-    // cursor_cache: HashMap<CursorKey, Glyph>,
-    font: Font,
+    let log_func = match kind {
+        gl::PROGRAM => gl::GetProgramInfoLog,
+        gl::SHADER => gl::GetShaderInfoLog,
+        _ => return String::new(),
+    };
 
-    /// Glyph offset.
-    // glyph_offset: Delta<i8>,
-
-    /// Font metrics.
-    metrics: crossfont::Metrics,
-}
-
-impl GlyphCache {
-    pub fn new(mut font: Font) -> Result<GlyphCache, crossfont::Error> {
-        let metrics = font.metrics()?;
-
-        let cache = Self {
-            cache: HashMap::default(),
-            font: font,
-            // font_key: regular,
-            metrics,
-        };
-
-        Ok(cache)
+    unsafe {
+        len_func(obj, gl::INFO_LOG_LENGTH, &mut max_length);
     }
 
-    pub fn get(&mut self, glyph_key: GlyphKey) -> Glyph {
-        if let Some(glyph) = self.cache.get(&glyph_key) {
-            return glyph.clone();
-        }
+    let mut actual_length: GLint = 0;
+    let mut buf: Vec<u8> = Vec::with_capacity(max_length as _);
 
-        let rasterized = self
-            .font
-            .get_glyph(glyph_key)
-            .unwrap_or_else(|_| Default::default());
-
-        let glyph = self.load_glyph(&rasterized);
-        self.cache.insert(glyph_key, glyph);
-
-        return glyph;
+    unsafe {
+        log_func(
+            obj,
+            max_length,
+            &mut actual_length,
+            buf.as_mut_ptr() as *mut _,
+        );
+        buf.set_len(actual_length as _);
     }
 
-    pub fn load_glyph(&self, glyph: &RasterizedGlyph) -> Glyph {
-        let colored = false;
-
-        let mut texture: GLuint = 0; // 用来存放 Texture 的 ID
-        unsafe {
-            gl::PixelStorei(gl::UNPACK_ALIGNMENT, 1);
-            gl::GenTextures(1, &mut texture);
-            gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, texture);
-
-            // gl.BindTexture(gl.TEXTURE_2D_MULTISAMPLE, texture)
-            // defer gl.BindTexture(gl.TEXTURE_2D_MULTISAMPLE, 0)
-
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_BORDER as _);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_BORDER as _);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as _);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
-
-            // Load data into OpenGL.
-            let (colored, format, buf) = match &glyph.buf {
-                BitmapBuffer::RGB(buf) => (false, gl::RGB, buf),
-                BitmapBuffer::RGBA(buf) => (true, gl::RGBA, buf),
-            };
-
-            // TODO: gl::TexSubImage2D
-            gl::TexImage2D(
-                gl::TEXTURE_2D,
-                0,
-                format as _,
-                glyph.width,
-                glyph.height,
-                0,
-                format,
-                gl::UNSIGNED_BYTE,
-                buf.as_ptr() as *const _,
-            );
-
-            /*
-                gl.TexImage2DMultisample(
-                    gl.TEXTURE_2D_MULTISAMPLE, 0, gl.RGBA,
-                    int32(rgba.Rect.Dx()), int32(rgba.Rect.Dy()),
-                    0, gl.RGBA, gl.UNSIGNED_BYTE, gl.Ptr(rgba.Pix),
-                )
-            */
-
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-        }
-
-        // Generate UV coordinates.
-        // let uv_bot = offset_y as f32 / 525.0;
-        // let uv_left = offset_x as f32 / 240.0;
-
-        Glyph {
-            texture,
-            colored,
-            top: glyph.top as _,
-            left: glyph.left as _,
-            width: glyph.width as _,
-            height: glyph.height as _,
-            uv_bot: (-504 + 122 + glyph.top) as f32 * 2.0 / 1050.0,
-            uv_left: (glyph.left as f32) * 2.0 / 2400.0,
-            uv_width: (glyph.width as f32) * 2.0 / 2400.0,
-            uv_height: (glyph.height as f32) * 2.0 / 1050.0,
-            uv_ascent: glyph.top as f32 * 2.0 / 1050.0,
-        }
-    }
+    String::from_utf8(buf).unwrap()
 }

@@ -1,17 +1,25 @@
-#![cfg_attr(debug_assertions, allow(dead_code, unused))]
+//! Peppa is a GPU enhanced terminal emulator.
+//! It can also be used to play MUD, act as a SSH client, connect to BBS, etc.
 
-use std::env;
-
-use glutin::event::{Event, WindowEvent};
-use glutin::event_loop::{ControlFlow, EventLoop};
-use log::info;
-use pretty_env_logger;
+#![deny(clippy::all, clippy::cargo)]
+#![allow(clippy::multiple_crate_versions)]
+#![warn(missing_docs, unused, dead_code)]
+#![cfg_attr(debug_assertions, allow(unused, dead_code))]
 
 mod font;
 mod gui;
 mod shader;
 
-use crate::gui::*;
+use {
+    crate::gui::Screen,
+    glutin::{
+        dpi::PhysicalSize,
+        event::{Event, WindowEvent},
+        event_loop::{ControlFlow, EventLoop},
+    },
+    log::info,
+    std::env,
+};
 
 #[derive(Debug)]
 enum Error {
@@ -28,15 +36,13 @@ fn main() -> Result<(), Error> {
     pretty_env_logger::init();
 
     let args: Vec<String> = env::args().collect();
-    if args.len() < 5 {
-        println!("Usage: {} <font> <size> <string1> <string2>", args[0]);
+    if args.len() < 4 {
+        println!("Usage: {} <font> <size> <string1> [<stringN> ...]", args[0]);
         return Ok(());
     }
 
     let font_family = &args[1];
     let font_size = &args[2];
-    let string1 = &args[3];
-    let string2 = &args[4];
 
     let el = EventLoop::new();
     let dpr = el
@@ -48,16 +54,19 @@ fn main() -> Result<(), Error> {
 
     let mut screen = Screen::new(&el, &font_family, font_size.parse::<i32>().unwrap())?;
     screen.set_title("Peppa");
+    screen.resize(PhysicalSize {
+        width: 1600,
+        height: 1200,
+    });
 
-    screen.set_line(0, string1);
-    screen.set_line(1, string2);
+    redraw(&mut screen);
 
     run(screen, el);
 
     Ok(())
 }
 
-fn run(screen: Screen, el: EventLoop<()>) {
+fn run(mut screen: Screen, el: EventLoop<()>) {
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
@@ -67,10 +76,20 @@ fn run(screen: Screen, el: EventLoop<()>) {
                 _ => (),
             },
             Event::RedrawRequested(_) => {
+                redraw(&mut screen);
                 screen.draw_frame();
             }
-            Event::LoopDestroyed => return,
+            Event::LoopDestroyed => {}
             _ => (),
         }
     });
+}
+
+fn redraw(screen: &mut Screen) {
+    let args: Vec<String> = env::args().collect();
+    let strs = &args[3..];
+
+    for (i, s) in strs.iter().enumerate() {
+        screen.set_line(i, s);
+    }
 }

@@ -1,11 +1,14 @@
-use log::{debug, info};
-
-use glutin::dpi::{PhysicalPosition, PhysicalSize};
-use glutin::event_loop::EventLoop;
-use glutin::window::{CursorIcon, WindowBuilder};
-use glutin::{self, ContextBuilder, PossiblyCurrent, WindowedContext};
-
-use crate::shader;
+use {
+    crate::shader,
+    glutin::{
+        self,
+        dpi::{PhysicalPosition, PhysicalSize},
+        event_loop::EventLoop,
+        window::{CursorIcon, WindowBuilder},
+        ContextBuilder, PossiblyCurrent, WindowedContext,
+    },
+    log::info,
+};
 
 #[derive(Debug)]
 pub enum Error {
@@ -31,9 +34,6 @@ pub struct Screen {
     lines: usize,
     columns: usize,
 
-    width: f32,
-    height: f32,
-
     pub wc: WindowedContext<PossiblyCurrent>,
     pub shader: shader::TextShader,
 }
@@ -58,32 +58,14 @@ impl Screen {
         let dpr = wc.window().current_monitor().scale_factor();
         info!("Device pixel ratio: {}", dpr);
 
-        let mut shader = shader::TextShader::new(dpr as _, font_family, font_size)?;
-
-        let (columns, lines) = (10, 2);
-        let (screen_width, screen_height) = (
-            shader.cell_width * columns as f32,
-            shader.cell_height * lines as f32,
-        );
-
-        shader.set_size(lines, columns);
-
-        debug!(
-            "screen_width: {}, screen_height: {}",
-            screen_width, screen_height
-        );
-
-        wc.window()
-            .set_inner_size(PhysicalSize::new(screen_width, screen_height));
+        let shader = shader::TextShader::new(dpr as _, font_family, font_size)?;
 
         Ok(Self {
-            title: title,
-            wc: wc,
-            lines: lines,
-            columns: columns,
-            width: screen_width,
-            height: screen_height,
-            shader: shader,
+            title,
+            wc,
+            lines: 0,
+            columns: 0,
+            shader,
         })
     }
 
@@ -92,15 +74,25 @@ impl Screen {
         self.wc.window().set_title(title);
     }
 
-    pub fn resize(&self, physical_size: PhysicalSize<u32>) {
-        self.wc.resize(physical_size);
+    pub fn resize(&mut self, window_size: PhysicalSize<u32>) {
         let full_size = self.wc.window().current_monitor().size();
+
+        self.columns = (window_size.width as f32 / self.shader.cell_width).floor() as usize;
+        self.lines = (window_size.height as f32 / self.shader.cell_height).floor() as usize;
+
+        info!(
+            "window_width: {}, window_height: {}, columns: {}, lines: {}",
+            window_size.width, window_size.height, self.columns, self.lines
+        );
+
+        self.wc.resize(window_size);
         self.wc.window().set_outer_position(PhysicalPosition {
-            x: (full_size.width - physical_size.width) / 2,
-            y: (full_size.height - physical_size.height) / 2,
+            x: (full_size.width - window_size.width) / 2,
+            y: (full_size.height - window_size.height) / 2,
         });
-        self.shader
-            .resize(physical_size.width, physical_size.height);
+
+        self.shader.resize(window_size.width, window_size.height);
+        self.shader.set_size(self.lines, self.columns);
     }
 
     pub fn draw_frame(&self) {
@@ -109,7 +101,11 @@ impl Screen {
     }
 
     pub fn set_line(&mut self, row: usize, s: &str) {
-        for (i, ch) in s.chars().enumerate() {
+        if row >= self.lines {
+            return;
+        }
+
+        for (i, ch) in s.chars().take(self.columns).enumerate() {
             self.shader.set_text(row, i, ch);
         }
     }

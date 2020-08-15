@@ -1,9 +1,10 @@
-use std::default::Default;
-
-use log::error;
-
-use crossfont::{
-    FontDesc, FontKey, GlyphKey, Rasterize, RasterizedGlyph, Rasterizer, Size, Slant, Style, Weight,
+use {
+    crossfont::{
+        FontDesc, FontKey, GlyphKey, Rasterize, RasterizedGlyph, Rasterizer, Size, Slant, Style,
+        Weight,
+    },
+    log::error,
+    std::default::Default,
 };
 
 /// Description of the normal font.
@@ -45,7 +46,7 @@ impl Font {
                 style: Some(String::from("Regular")),
             },
             size: Size::new(size as _),
-            dpr: dpr,
+            dpr,
             rasterizer: Rasterizer::new(dpr, true).unwrap(),
         }
     }
@@ -59,7 +60,6 @@ impl Font {
         FontDesc::new(desc.family.clone(), style)
     }
 
-    /// Computes font keys for (Regular, Bold, Italic, Bold Italic).
     pub fn compute_font_keys(&mut self) -> Result<FontKey, crossfont::Error> {
         let size = self.size;
 
