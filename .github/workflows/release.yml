@@ -1,0 +1,108 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - v*
+
+jobs:
+    Build:
+        runs-on: ${{ matrix.os }}
+
+        strategy:
+            matrix:
+                os: [ubuntu-18.04, ubuntu-20.04, macos-10.15, windows-2019, windows-2016]
+
+        steps:
+          - uses: actions/checkout@v2
+          - name: Build
+            run: cargo build --release
+            env:
+                CARGO_TERM_COLOR: always
+
+          - name: Strip macOS/Linux binary
+            if: ${{ matrix.os != 'windows-2016' && matrix.os != 'windows-2019' }}
+            run: strip -x target/release/peppa
+
+          - uses: actions/upload-artifact@v2
+            if: ${{ matrix.os != 'windows-2016' && matrix.os != 'windows-2019' }}
+            with:
+                name: peppa-${{ matrix.os }}
+            path: target/release/peppa
+
+          - uses: actions/upload-artifact@v2
+            if: ${{ matrix.os == 'windows-2016' || matrix.os == 'windows-2019' }}
+            with:
+                name: peppa-${{ matrix.os }}
+            path: target/release/peppa.exe
+
+    Release:
+        name: Release to GitHub
+        needs: Build
+        runs-on: ubuntu-latest
+
+        steps:
+          - uses: actions/download-artifact@v2
+          - name: Display structure of downloaded files
+            run: ls -l peppa-*
+
+          - name: Create Release
+            id: create_release
+            uses: actions/create-release@v1
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            with:
+                tag_name: ${{ github.ref }}
+            release_name: Release ${{ github.ref }}
+            draft: false
+            prerelease: false
+
+          - name: Upload Asset - ubuntu-18.04
+            uses: actions/upload-release-asset@v1
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            with:
+                upload_url: ${{ steps.create_release.outputs.upload_url }}
+            asset_content_type: application/octet-stream
+            asset_name: Peppa-Ubuntu-18.04
+            asset_path: peppa-ubuntu-18.04/peppa
+
+          - name: Upload Asset - ubuntu-20.04
+            uses: actions/upload-release-asset@v1
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            with:
+                upload_url: ${{ steps.create_release.outputs.upload_url }}
+            asset_content_type: application/octet-stream
+            asset_name: Peppa-Ubuntu-20.04
+            asset_path: peppa-ubuntu-20.04/peppa
+
+          - name: Upload Asset - macOS-10.15
+            uses: actions/upload-release-asset@v1
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            with:
+                upload_url: ${{ steps.create_release.outputs.upload_url }}
+            asset_content_type: application/octet-stream
+            asset_name: Peppa-macOS-10.15
+            asset_path: peppa-macos-10.15/peppa
+
+          - name: Upload Asset - Windows Server 2016
+            uses: actions/upload-release-asset@v1
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            with:
+                upload_url: ${{ steps.create_release.outputs.upload_url }}
+            asset_content_type: application/octet-stream
+            asset_name: Peppa-Windows-2016.exe
+            asset_path: peppa-windows-2016/peppa.exe
+
+          - name: Upload Asset - Windows Server 2019
+            uses: actions/upload-release-asset@v1
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            with:
+                upload_url: ${{ steps.create_release.outputs.upload_url }}
+            asset_content_type: application/octet-stream
+            asset_name: Peppa-Windows-2019.exe
+            asset_path: peppa-windows-2019/peppa.exe
