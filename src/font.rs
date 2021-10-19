@@ -74,15 +74,12 @@ impl Font {
         description: &FontDesc,
         size: Size,
     ) -> Result<FontKey, crossfont::Error> {
-        match self.rasterizer.load_font(description, size) {
-            Ok(font_key) => Ok(font_key),
-            Err(err) => {
-                error!("load font {} error: {}", description, err);
-                let fallback_desc =
-                    Self::make_desc(&Font::default().normal, Slant::Normal, Weight::Normal);
-                self.rasterizer.load_font(&fallback_desc, size)
-            }
-        }
+        self.rasterizer.load_font(description, size).or_else(|e| {
+            error!("load font {} error: {}", description, e);
+            let fallback_desc =
+                Self::make_desc(&Font::default().normal, Slant::Normal, Weight::Normal);
+            self.rasterizer.load_font(&fallback_desc, size)
+        })
     }
 
     /// Calculate font metrics without access to a glyph cache.
