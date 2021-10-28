@@ -1,8 +1,6 @@
 //! Peppa is a GPU enhanced terminal emulator.
 //! It can also be used to play MUD, act as a SSH client, connect to BBS, etc.
 
-#![deny(clippy::all, clippy::cargo)]
-#![allow(clippy::multiple_crate_versions)]
 #![warn(missing_docs, unused, dead_code)]
 #![cfg_attr(debug_assertions, allow(unused, dead_code))]
 
@@ -23,12 +21,12 @@ use {
 
 #[derive(Debug)]
 enum Error {
-    GUI(gui::Error),
+    Gui(gui::Error),
 }
 
 impl From<gui::Error> for Error {
     fn from(err: gui::Error) -> Self {
-        Error::GUI(err)
+        Error::Gui(err)
     }
 }
 
@@ -52,7 +50,7 @@ fn main() -> Result<(), Error> {
         .unwrap_or(1.);
     info!("Device pixel ratio: {}", dpr);
 
-    let mut screen = Screen::new(&el, &font_family, font_size.parse::<i32>().unwrap())?;
+    let mut screen = Screen::new(&el, font_family, font_size.parse::<i32>().unwrap())?;
     screen.set_title("Peppa");
     screen.resize(PhysicalSize {
         width: 1600,
