@@ -8,6 +8,11 @@ test:
              'the lazy dog'                     \
              'THE QUICK BROWN FOX JUMPS OVER'   \
              'THE LAZY DOG'
+xkx:
+    RUST_LOG=debug cargo run -- 'PingFang SC' 24 \
+             '' \
+             ' 飞 雪 连 天 射 白 鹿'   \
+             ' 笑 书 神 侠 倚 碧 鸳'
 
 test-emoji:
     RUST_LOG=debug cargo run -- 'Apple Color Emoji' 180 '💗 👌 ✅ ❌ 👍' '👨 👩 👦 👧 🀄️'
