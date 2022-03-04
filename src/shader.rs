@@ -9,7 +9,7 @@ use {
     crossfont::{BitmapBuffer, FontKey, GlyphKey, RasterizedGlyph},
     gl::types::*,
     log::{debug, error},
-    std::{collections::HashMap, default::Default, fs, io, mem, path::PathBuf, ptr},
+    std::{collections::HashMap, fs, io, mem, path::PathBuf, ptr},
 };
 
 /// Set OpenGL symbol loader. This call MUST be after window.make_current on windows.
@@ -143,11 +143,6 @@ impl TextShader {
             size: self.glyph_cache.font.size,
         });
 
-        debug!(
-            "ch: {} font descent: {} glyph: {:?}",
-            ch, self.cell_descent, glyph
-        );
-
         self.cells[row][col].set_text(ch, &glyph);
     }
 
@@ -195,10 +190,8 @@ impl TextShader {
 
         Ok((
             metrics.descent,
-            ((metrics.average_advance + offset_x) as f32)
-                .floor()
-                .max(1.),
-            ((metrics.line_height + offset_y) as f32).floor().max(1.),
+            ((metrics.average_advance + offset_x) as f32).max(1.),
+            ((metrics.line_height + offset_y) as f32).max(1.),
         ))
     }
 }
@@ -345,7 +338,6 @@ impl Cell {
             match draw_flag {
                 // draw texture(0)
                 0 => {
-                    debug!("draw {}: {:?}", self.ch, self.gl_instance_attr);
                     gl::PolygonMode(gl::FRONT_AND_BACK, gl::FILL);
                     gl::DrawElementsInstanced(gl::TRIANGLES, 6, gl::UNSIGNED_INT, ptr::null(), 1);
                 }

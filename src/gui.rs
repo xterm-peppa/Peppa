@@ -4,7 +4,7 @@ use {
         self,
         dpi::{PhysicalPosition, PhysicalSize},
         event_loop::EventLoop,
-        window::{CursorIcon, WindowBuilder},
+        window::{CursorIcon, Fullscreen, WindowBuilder},
         ContextBuilder, PossiblyCurrent, WindowedContext,
     },
     log::info,
@@ -14,6 +14,7 @@ use {
 pub enum Error {
     Glutin(glutin::CreationError),
     Shader(shader::CreationError),
+    Other(String),
 }
 
 impl From<glutin::CreationError> for Error {
@@ -28,11 +29,16 @@ impl From<shader::CreationError> for Error {
     }
 }
 
+#[derive(Debug)]
+pub struct Size {
+    pub lines: usize,
+    pub columns: usize,
+}
+
 pub struct Screen {
     title: String,
 
-    lines: usize,
-    columns: usize,
+    size: Size,
 
     pub wc: WindowedContext<PossiblyCurrent>,
     pub shader: shader::TextShader,
@@ -44,27 +50,32 @@ impl Screen {
         let wb = WindowBuilder::new();
         let wc = ContextBuilder::new().build_windowed(wb, el)?;
         let wc = unsafe { wc.make_current().unwrap() };
+        let win = wc.window();
 
         shader::setup_opengl(|symbol| wc.get_proc_address(symbol) as *const _);
 
-        wc.window().set_title(title.as_str());
-        wc.window().set_cursor_icon(CursorIcon::Text);
+        win.set_title(title.as_str());
+        win.set_cursor_icon(CursorIcon::Text);
+        win.set_visible(true);
 
         info!(
             "Pixel format of the window's GL context: {:?}",
             wc.get_pixel_format()
         );
 
-        let dpr = wc.window().current_monitor().scale_factor();
+        let dpr = win.current_monitor().scale_factor();
         info!("Device pixel ratio: {}", dpr);
 
         let shader = shader::TextShader::new(dpr as _, font_family, font_size)?;
+        let size = Size {
+            lines: 25,
+            columns: 80,
+        };
 
         Ok(Self {
             title,
             wc,
-            lines: 0,
-            columns: 0,
+            size,
             shader,
         })
     }
@@ -74,25 +85,35 @@ impl Screen {
         self.wc.window().set_title(title);
     }
 
-    pub fn resize(&mut self, window_size: PhysicalSize<u32>) {
-        let full_size = self.wc.window().current_monitor().size();
+    pub fn toggle_fullscreen(&mut self) {
+        self.wc
+            .window()
+            .set_fullscreen(self.wc.window().fullscreen().map_or(
+                Some(Fullscreen::Borderless(self.wc.window().current_monitor())),
+                |_| None,
+            ));
+    }
 
-        self.columns = (window_size.width as f32 / self.shader.cell_width).floor() as usize;
-        self.lines = (window_size.height as f32 / self.shader.cell_height).floor() as usize;
+    pub fn resize(&mut self) {
+        let window_size = self.wc.window().inner_size();
+
+        let size = Size {
+            columns: (window_size.width as f32 / self.shader.cell_width).floor() as usize,
+            lines: (window_size.height as f32 / self.shader.cell_height).floor() as usize,
+        };
 
         info!(
             "window_width: {}, window_height: {}, columns: {}, lines: {}",
-            window_size.width, window_size.height, self.columns, self.lines
+            window_size.width, window_size.height, size.columns, size.lines
         );
 
         self.wc.resize(window_size);
-        self.wc.window().set_outer_position(PhysicalPosition {
-            x: (full_size.width - window_size.width) / 2,
-            y: (full_size.height - window_size.height) / 2,
-        });
+        self.wc.window().request_redraw();
+        info!("term size: {:?}, windows size: {:?}", size, window_size);
 
         self.shader.resize(window_size.width, window_size.height);
-        self.shader.set_size(self.lines, self.columns);
+        self.shader.set_size(size.lines, size.columns);
+        self.size = size;
     }
 
     pub fn draw_frame(&self) {
@@ -101,11 +122,11 @@ impl Screen {
     }
 
     pub fn set_line(&mut self, row: usize, s: &str) {
-        if row >= self.lines {
+        if row >= self.size.lines {
             return;
         }
 
-        for (i, ch) in s.chars().take(self.columns).enumerate() {
+        for (i, ch) in s.chars().take(self.size.columns).enumerate() {
             self.shader.set_text(row, i, ch);
         }
     }

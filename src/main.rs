@@ -9,10 +9,10 @@ mod gui;
 mod shader;
 
 use {
-    crate::gui::Screen,
+    crate::gui::{Screen, Size},
     glutin::{
         dpi::PhysicalSize,
-        event::{Event, WindowEvent},
+        event::{ElementState, Event, KeyboardInput, ModifiersState, VirtualKeyCode, WindowEvent},
         event_loop::{ControlFlow, EventLoop},
     },
     log::info,
@@ -43,19 +43,26 @@ fn main() -> Result<(), Error> {
     let font_size = &args[2];
 
     let el = EventLoop::new();
-    let dpr = el
+    let (size, dpr) = el
         .available_monitors()
         .next()
-        .map(|m| m.scale_factor())
-        .unwrap_or(1.);
-    info!("Device pixel ratio: {}", dpr);
+        .map(|m| (m.size(), m.scale_factor()))
+        .unwrap_or((
+            PhysicalSize {
+                width: 1024,
+                height: 768,
+            },
+            1.0,
+        ));
+
+    info!(
+        "Monitor physical size: {:?} Device pixel ratio: {}",
+        size, dpr
+    );
 
     let mut screen = Screen::new(&el, font_family, font_size.parse::<i32>().unwrap())?;
     screen.set_title("Peppa");
-    screen.resize(PhysicalSize {
-        width: 1600,
-        height: 1200,
-    });
+    screen.resize();
 
     redraw(&mut screen);
 
@@ -65,12 +72,27 @@ fn main() -> Result<(), Error> {
 }
 
 fn run(mut screen: Screen, el: EventLoop<()>) {
+    let mut modifiers_state = Default::default();
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         match event {
             Event::WindowEvent { event, .. } => match event {
-                WindowEvent::Resized(physical_size) => screen.resize(physical_size),
+                WindowEvent::Resized(physical_size) => screen.resize(),
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::ModifiersChanged(state) => modifiers_state = state,
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            virtual_keycode: Some(VirtualKeyCode::Return),
+                            state: ElementState::Pressed,
+                            ..
+                        },
+                    ..
+                } => {
+                    if modifiers_state.logo() {
+                        screen.toggle_fullscreen();
+                    }
+                }
                 _ => (),
             },
             Event::RedrawRequested(_) => {

@@ -86,13 +86,6 @@ impl Font {
     pub fn metrics(&mut self) -> Result<crossfont::Metrics, crossfont::Error> {
         let regular_desc = Self::make_desc(&self.normal, Slant::Normal, Weight::Normal);
         let regular = self.load_regular_font(&regular_desc, self.size)?;
-
-        self.rasterizer.get_glyph(GlyphKey {
-            font_key: regular,
-            c: 'm',
-            size: self.size,
-        })?;
-
         self.rasterizer.metrics(regular, self.size)
     }
 
