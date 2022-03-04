@@ -139,7 +139,7 @@ impl TextShader {
     pub fn set_text(&mut self, row: usize, col: usize, ch: char) {
         let glyph = self.glyph_cache.get(GlyphKey {
             font_key: self.font_key,
-            c: ch,
+            character: ch,
             size: self.glyph_cache.font.size,
         });
 
@@ -416,9 +416,9 @@ impl GlyphCache {
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as _);
 
             // Parse glyph buffer.
-            let (format, buf) = match &glyph.buf {
-                BitmapBuffer::RGB(buf) => (gl::RGB, buf),
-                BitmapBuffer::RGBA(buf) => (gl::RGBA, buf),
+            let (format, buf) = match &glyph.buffer {
+                BitmapBuffer::Rgb(buf) => (gl::RGB, buf),
+                BitmapBuffer::Rgba(buf) => (gl::RGBA, buf),
             };
 
             // Load data into OpenGL.

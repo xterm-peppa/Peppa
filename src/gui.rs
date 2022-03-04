@@ -63,7 +63,10 @@ impl Screen {
             wc.get_pixel_format()
         );
 
-        let dpr = win.current_monitor().scale_factor();
+        let dpr = win
+            .current_monitor()
+            .ok_or(Error::Other(String::from("No monitor detected")))?
+            .scale_factor();
         info!("Device pixel ratio: {}", dpr);
 
         let shader = shader::TextShader::new(dpr as _, font_family, font_size)?;
@@ -86,12 +89,13 @@ impl Screen {
     }
 
     pub fn toggle_fullscreen(&mut self) {
-        self.wc
-            .window()
-            .set_fullscreen(self.wc.window().fullscreen().map_or(
-                Some(Fullscreen::Borderless(self.wc.window().current_monitor())),
-                |_| None,
-            ));
+        self.wc.window().set_fullscreen(
+            self.wc
+                .window()
+                .fullscreen()
+                .map_or(Some(Fullscreen::Borderless(None)), |_| None),
+        );
+        self.resize();
     }
 
     pub fn resize(&mut self) {

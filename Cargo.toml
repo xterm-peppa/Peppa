@@ -13,8 +13,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crossfont = "0.1"
-glutin = "0.24"
+crossfont = "0.3"
+glutin = "0.28"
 log = "0.4"
 pretty_env_logger = "0.4"
 
